@@ -142,8 +142,8 @@ writeValuesToDatabase <- function(values, tableName, appendChoice, key=0){
   on.exit(dbDisconnect(con))
   con <- dbConnect(drv = dbDriver("PostgreSQL"),
                    dbname = "c7701050", host = "db06.intra.uibk.ac.at",
-                   port = 5432, user = "c7701050",
-                   password = "hS&3p8!3")
+                   port = 5432, user = user,
+                   password = password)
   if (!appendChoice){
     dbWriteTable(con, tableName, value = values, append = FALSE)
   }
