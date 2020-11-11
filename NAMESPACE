@@ -2,6 +2,7 @@
 
 export(FixIDs)
 export(checkColTypes)
+export(combineFiles)
 export(dbSafeNames)
 export(queryDatabase)
 export(writeNewDataset)

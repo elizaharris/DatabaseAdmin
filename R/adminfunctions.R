@@ -257,6 +257,49 @@ writeNewDataset <- function(data_path, metadata_path, datasetid, base_path="/Vol
   setwd(pwd)
 }
 
-
+#' Function for combining files into a single csv
+#'
+#' Specify a folder, a format and a pattern, and all files of the specified format with the
+#' pattern in their name in the chosen folder will be combined. The name of the output combined
+#' file is given under the "save" input; if this is not include the data will be combined but not
+#' automatically saved.
+#' Note: all files to be combined MUST have the same column names!
+#' @param path The folder containing the data to be combined
+#' @param filepattern A string pattern that must be contained in the names of files to be combined
+#' @param fileformat The format of the files to be combined
+#' @param sheetchoice For excel files: the name of the sheet to be used
+#' @param save The name of the combined file to be saved (default = "n" = don't save)
+#' @export
+combineFiles = function(path,filepattern,fileformat,sheetchoice="Daten",save="n"){
+  filenames = list.files(path)
+  filenames = filenames[grep(filepattern,filenames)]
+  if (fileformat=="xlsx"){
+    for (n in seq_along(filenames)){
+      if (n==1){
+        names = colnames(read_excel(paste0(path,filenames[n]),skip=1,sheet=sheetchoice))
+        data = read_excel(paste0(path,filenames[n]),col_names=names,skip=4,sheet=sheetchoice)
+      } else {
+        newnames = colnames(read_excel(paste0(path,filenames[n]),skip=1,sheet=sheetchoice))
+        newdata = read_excel(paste0(path,filenames[n]),col_names=names,skip=4,sheet=sheetchoice)
+        data = bind_rows(data,newdata)
+      }
+    } }
+  if (fileformat=="dat"){
+    for (n in seq_along(filenames)){
+      print(n)
+      if (n==1){
+        names = colnames(read_delim(paste0(path,filenames[n]),skip=1,delim=","))
+        data = read_delim(paste0(path,filenames[n]),col_names=names,skip=4,delim=",")
+      } else {
+        names = colnames(read_delim(paste0(path,filenames[n]),skip=1,delim=","))
+        newdata = read_delim(paste0(path,filenames[n]),col_names=names,skip=4,delim=",")
+        data = bind_rows(data,newdata)
+      }
+    } }
+  if (save!="n"){
+    write.csv(data,paste0(path,save,".csv"))
+  }
+  return(data)
+}
 
 
