@@ -138,16 +138,18 @@ FixIDs <- function(data,uniq=FALSE){
 #' @param key column use to compare the old and new data; only new data unique in this column will be added (eg. use date or a key/id)
 #' @keywords database
 #' @export
-writeValuesToDatabase <- function(values, tableName, appendChoice, key=0){
+writeValuesToDatabase <- function(values, tableName, appendChoice, appendType="match", key=0){
   on.exit(dbDisconnect(con))
   con <- dbConnect(drv = dbDriver("PostgreSQL"),
                    dbname = "c7701050", host = "db06.intra.uibk.ac.at",
                    port = 5432, user = user,
                    password = password)
+  # case = no appending, new data
   if (!appendChoice){
     dbWriteTable(con, tableName, value = values, append = FALSE)
   }
-  if (appendChoice & dbExistsTable(con, tableName)){
+  # case = append, same columns names in new and old data
+  if (appendChoice & appendType=="match" & dbExistsTable(con, tableName)){
     # if appending, compare the pub id keys in the existing and new table and add only new data
     tmp = queryDatabase(paste0("SELECT * FROM ",tableName))
     values[,key][[1]] = dbSafeNames(values[,key][[1]])
@@ -158,6 +160,63 @@ writeValuesToDatabase <- function(values, tableName, appendChoice, key=0){
       dbWriteTable(con, tableName, value = values[r,], append = TRUE)
     } else { print("No new rows in table") }
   }
+  # case = append, new columns added, use outer join
+  if (appendChoice & appendType=="outer" & dbExistsTable(con, tableName)){
+    print("Before appending new data:")
+    prev_size = showSize(tableName)
+    # compare the chosen keys in the existing and new table and add only new data
+    for (n in seq_along(key)){ # get the key from the database
+      tmp = queryDatabase(paste0("SELECT ",key[n]," FROM ",tableName))[[1]]
+      if (class(tmp)[1]=="POSIXct"){ tmp = as.numeric(tmp) }
+      tmp[is.na(tmp)] = "X"
+      if (n==1){ db_key = dbSafeNames(tmp)
+      } else { db_key = cbind(db_key,dbSafeNames(tmp)) }
+    }
+    for (n in seq_along(key)){ # get the key from the new data
+      tmp = values[,key[n]][[1]]
+      if (class(tmp)[1]=="POSIXct"){ tmp = as.numeric(tmp) }
+      if (n==1){ v_key = dbSafeNames(tmp)
+      } else { v_key = cbind(v_key,dbSafeNames(tmp)) }
+    }
+    for (n in seq_along(key)){ # combine multiple keys into a single string for better comparison
+      if (n == 1){ db_key_comb = db_key[,1]
+      v_key_comb = v_key[,1]
+      } else { db_key_comb = paste(db_key_comb,db_key[,n],sep="_")
+      v_key_comb = paste(v_key_comb,v_key[,n],sep="_")
+      }
+    }
+    new = setdiff(v_key_comb,db_key_comb)
+    # find which columns are new and add these to the database
+    values = values[,colnames(values)!="X1"]
+    existing_cols = queryDatabase(paste0("SELECT column_name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '",tableName,"';"))[,1]
+    new_cols = setdiff(colnames(values),existing_cols)
+    for (n in seq_along(new_cols)){
+      type = class(values[,new_cols[n]][[1]])[1]
+      if (type=="POSIXct"){type="timestamp"}
+      else if (type=="logical"){type="boolean"}
+      else if (type!="numeric"){print("column type is not recognised and needs to be added to function")}
+      queryDatabase(paste0("ALTER TABLE ",tableName," ADD COLUMN ",new_cols[n]," ",type,";"))
+    }
+    if (length(new)!=0){
+      print("New columns were added:")
+      new_cols
+    } else {print("No new columns were added.")}
+    # add the new data to the database
+    if (length(new)>0){
+      r = as.integer(new)
+      for (n in 1:length(new)){r[n] = which(v_key_comb==new[n])}
+      newdata = data.frame(values[r,])
+      for (n in seq_along(newdata[1,])){
+        if (!is.POSIXct(newdata[,n])){
+          tmp = which(newdata[,n]>99999999 | newdata[,n]=="Inf")
+          newdata[tmp,n] = NA # get rid of Inf values (not allowed in postgres)
+        } }
+      dbWriteTable(con, tableName, value = newdata, append = TRUE)
+    } else { print("No new rows in table") }
+    print("After appending new data:")
+    post_size = showSize(tableName)
+  }
+  # case = table does't exist and can't append
   if (appendChoice & !dbExistsTable(con, tableName)){ print("Cannot append; table does not exist") }
 }
 

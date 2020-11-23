@@ -4,7 +4,13 @@
 \alias{writeValuesToDatabase}
 \title{Function for writing a tibble as a table the database}
 \usage{
-writeValuesToDatabase(values, tableName, appendChoice, key = 0)
+writeValuesToDatabase(
+  values,
+  tableName,
+  appendChoice,
+  appendType = "match",
+  key = 0
+)
 }
 \arguments{
 \item{values}{tibble to be added to the server}
