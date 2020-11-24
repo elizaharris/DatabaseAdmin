@@ -135,7 +135,8 @@ FixIDs <- function(data,uniq=FALSE){
 #' @param values tibble to be added to the server
 #' @param tableName name of table in the database
 #' @param appendChoice TRUE to append to existing table of the same name; otherwise false
-#' @param key column use to compare the old and new data; only new data unique in this column will be added (eg. use date or a key/id)
+#' @param appendType match is the default; this means the existing and new tables have the same columns. "outer" can also be chosen for an outer join of existing and new data.
+#' @param key column used to compare the old and new data; only new data unique in this column will be added (eg. use date or a key/id). With outer join appending, multiple keys are allowed. With match appending, so far only one key is implemented.
 #' @keywords database
 #' @export
 writeValuesToDatabase <- function(values, tableName, appendChoice, appendType="match", key=0){
