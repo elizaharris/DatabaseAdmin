@@ -4,7 +4,15 @@
 \alias{combineFiles}
 \title{Function for combining files into a single csv}
 \usage{
-combineFiles(path, filepattern, fileformat, sheetchoice = "Daten", save = "n")
+combineFiles(
+  path,
+  filepattern,
+  fileformat,
+  sheetchoice = "Daten",
+  save = "n",
+  skiphead = 1,
+  skipdata = 4
+)
 }
 \arguments{
 \item{path}{The folder containing the data to be combined}
@@ -13,9 +21,13 @@ combineFiles(path, filepattern, fileformat, sheetchoice = "Daten", save = "n")
 
 \item{fileformat}{The format of the files to be combined}
 
-\item{sheetchoice}{For excel files: the name of the sheet to be used}
+\item{sheetchoice}{For excel files: the name of the sheet to be used (enter NULL if only one sheet and you don't want to specify name)}
 
 \item{save}{The name of the combined file to be saved (default = "n" = don't save)}
+
+\item{skiphead}{Number of lines to be skipped before colnames are given (default = 1 as MM data has colnames in second line)}
+
+\item{skipdata}{Number of lines to be skipped before data begins (default = 4 as MM data has 4 header lines)}
 }
 \description{
 Specify a folder, a format and a pattern, and all files of the specified format with the

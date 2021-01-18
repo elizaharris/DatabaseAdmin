@@ -11,8 +11,9 @@ queryDatabase <- function(query){
   on.exit(dbDisconnect(con))
   con <- dbConnect(drv = dbDriver("PostgreSQL"),
                    dbname = "c7701050", host = "db06.intra.uibk.ac.at",
-                   port = 5432, user = user,
-                   password = password)
+                   port = 5432,
+                   user = keyring::key_list("databaseadminlogin", keyring ="DBcredentials")[1,2],
+                   password = keyring::key_get("databaseadminlogin", "c7701050", keyring ="DBcredentials"))
   tmp <- dbGetQuery(con, query)
 }
 
@@ -327,20 +328,22 @@ writeNewDataset <- function(data_path, metadata_path, datasetid, base_path="/Vol
 #' @param path The folder containing the data to be combined
 #' @param filepattern A string pattern that must be contained in the names of files to be combined
 #' @param fileformat The format of the files to be combined
-#' @param sheetchoice For excel files: the name of the sheet to be used
+#' @param sheetchoice For excel files: the name of the sheet to be used (enter NULL if only one sheet and you don't want to specify name)
+#' @param skiphead Number of lines to be skipped before colnames are given (default = 1 as MM data has colnames in second line)
+#' @param skipdata Number of lines to be skipped before data begins (default = 4 as MM data has 4 header lines)
 #' @param save The name of the combined file to be saved (default = "n" = don't save)
 #' @export
-combineFiles = function(path,filepattern,fileformat,sheetchoice="Daten",save="n"){
+combineFiles = function(path,filepattern,fileformat,sheetchoice="Daten",save="n",skiphead=1,skipdata=4){
   filenames = list.files(path)
   filenames = filenames[grep(filepattern,filenames)]
   if (fileformat=="xlsx"){
     for (n in seq_along(filenames)){
       if (n==1){
-        names = colnames(read_excel(paste0(path,filenames[n]),skip=1,sheet=sheetchoice))
-        data = read_excel(paste0(path,filenames[n]),col_names=names,skip=4,sheet=sheetchoice)
+        names = colnames(read_excel(paste0(path,filenames[n]),skip=skiphead,sheet=sheetchoice))
+        data = read_excel(paste0(path,filenames[n]),col_names=names,skip=skipdata,sheet=sheetchoice)
       } else {
-        newnames = colnames(read_excel(paste0(path,filenames[n]),skip=1,sheet=sheetchoice))
-        newdata = read_excel(paste0(path,filenames[n]),col_names=names,skip=4,sheet=sheetchoice)
+        newnames = colnames(read_excel(paste0(path,filenames[n]),skip=skiphead,sheet=sheetchoice))
+        newdata = read_excel(paste0(path,filenames[n]),col_names=names,skip=skipdata,sheet=sheetchoice)
         data = bind_rows(data,newdata)
       }
     } }
@@ -348,11 +351,23 @@ combineFiles = function(path,filepattern,fileformat,sheetchoice="Daten",save="n"
     for (n in seq_along(filenames)){
       print(n)
       if (n==1){
-        names = colnames(read_delim(paste0(path,filenames[n]),skip=1,delim=","))
-        data = read_delim(paste0(path,filenames[n]),col_names=names,skip=4,delim=",")
+        names = colnames(read_delim(paste0(path,filenames[n]),skip=skiphead,delim=","))
+        data = read_delim(paste0(path,filenames[n]),col_names=names,skip=skipdata,delim=",")
       } else {
-        names = colnames(read_delim(paste0(path,filenames[n]),skip=1,delim=","))
-        newdata = read_delim(paste0(path,filenames[n]),col_names=names,skip=4,delim=",")
+        names = colnames(read_delim(paste0(path,filenames[n]),skip=skiphead,delim=","))
+        newdata = read_delim(paste0(path,filenames[n]),col_names=names,skip=skipdata,delim=",")
+        data = bind_rows(data,newdata)
+      }
+    } }
+  if (fileformat=="txt"){
+    for (n in seq_along(filenames)){
+      print(n)
+      if (n==1){
+        names = colnames(read_delim(paste0(path,filenames[n]),skip=skiphead,delim="\t"))
+        data = read_delim(paste0(path,filenames[n]),col_names=names,skip=skipdata,delim="\t")
+      } else {
+        names = colnames(read_delim(paste0(path,filenames[n]),skip=skiphead,delim="\t"))
+        newdata = read_delim(paste0(path,filenames[n]),col_names=names,skip=skipdata,delim="\t")
         data = bind_rows(data,newdata)
       }
     } }
