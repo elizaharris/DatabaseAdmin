@@ -9,7 +9,8 @@ iii) add datasetid column and foreign key referencing datasets table, iv) exit c
 writeNewDataset_single(
   data_path,
   datasetid,
-  base_path = "/Volumes/daten_inst/oekophysiologie/"
+  base_path = "/Volumes/daten_inst/oekophysiologie/",
+  converttime = 0
 )
 }
 \arguments{
@@ -18,6 +19,8 @@ writeNewDataset_single(
 \item{datasetid}{ID for the dataset to be added (the dataset must already have been added to the datasets table!)}
 
 \item{base_path}{Path from root to the data folder (normally set as the server: "/Volumes/daten_inst/oekophysiologie/" but you must be connected to the server for this to work)}
+
+\item{converttime}{If 0, dataset is added as normal. If "timename" then the column timename is converted from PosixCT to a time string before it is added to the database. It is then converted back to a timestamp in Postgres. The reason for this is because timestamps are causing R to crash in newest versions of DBI?}
 }
 \description{
 Function for writing a single new dataset from a csv to the database

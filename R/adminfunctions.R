@@ -144,8 +144,9 @@ writeValuesToDatabase <- function(values, tableName, appendChoice, appendType="m
   on.exit(dbDisconnect(con))
   con <- dbConnect(drv = dbDriver("PostgreSQL"),
                    dbname = "c7701050", host = "db06.intra.uibk.ac.at",
-                   port = 5432, user = user,
-                   password = password)
+                   port = 5432,
+                   user = keyring::key_list("databaseadminlogin", keyring ="DBcredentials")[1,2],
+                   password = keyring::key_get("databaseadminlogin", "c7701050", keyring ="DBcredentials"))
   # case = no appending, new data
   if (!appendChoice){
     dbWriteTable(con, tableName, value = values, append = FALSE)
@@ -228,29 +229,34 @@ writeValuesToDatabase <- function(values, tableName, appendChoice, appendType="m
 #' @param base_path Path from root to the data folder (normally set as the server: "/Volumes/daten_inst/oekophysiologie/" but you must be connected to the server for this to work)
 #' @param data_path Path from the base path data folder to the csv data file
 #' @param datasetid ID for the dataset to be added (the dataset must already have been added to the datasets table!)
+#' @param converttime If 0, dataset is added as normal. If "timename" then the column timename is converted from PosixCT to a time string before it is added to the database. It is then converted back to a timestamp in Postgres. The reason for this is because timestamps are causing R to crash in newest versions of DBI?
 #' @keywords database
 #' @examples New example, test online
 #' @export
-writeNewDataset_single <- function(data_path, datasetid, base_path="/Volumes/daten_inst/oekophysiologie/"){
+writeNewDataset_single <- function(data_path, datasetid, base_path="/Volumes/daten_inst/oekophysiologie/",converttime=0){
   pwd = getwd()
   setwd(base_path)
   datasetid = dbSafeNames(datasetid)
   # first drop any tables that already exist with the same name
   queryDatabase(paste0("DROP TABLE IF EXISTS ",paste0("z_",datasetid)," CASCADE;"))
   # get the data into R
-  data = read_csv(data_path, col_names = TRUE)
-  data2 = read_csv(data_path, col_names = TRUE,col_types = cols(.default = "d"))
-  types = sapply(data, class) # check logicals are correct (1000 NA values is parsed as logical)
-  for (n in seq_along(types)){
-    if (types[n]=="logical"){
-      if (length(unique(data2[,n])[[1]])>3){ # if multiple unique values it is not logical
-        data[,n] = data2[,n]
-      }
-    }
-  }
+  data_alltypes = data.frame(read_csv(data_path, col_names = TRUE))
+  data = data.frame(read_csv(data_path, col_names = TRUE,col_types = cols(.default = "d")))
+  types = sapply(data_alltypes, class) # most logicals are not correct (1000 NA values is parsed as logical)
+  tmp = which(sapply(types,function(x){x[[1]]=="POSIXct" | x[[1]]=="character"}))
+  for (n in seq_along(tmp)){ data[,tmp[n]] = data_alltypes[,tmp[n]] } # this puts the non-logical columns into data
+  rm(data_alltypes)
   colnames(data) = dbSafeNames(colnames(data))
+  #data = as_tibble(data)
   # check the columns names of data and metadata match
-  writeValuesToDatabase(values = data, tableName = paste0("z_",datasetid), appendChoice = FALSE)
+  if (converttime==0){
+    writeValuesToDatabase(values = data, tableName = paste0("z_",datasetid), appendChoice = FALSE)
+  } else {
+    data[,converttime] = format(data[,converttime], "%Y-%m-%d %H:%M:%S")
+    writeValuesToDatabase(values = data, tableName = paste0("z_",datasetid), appendChoice = FALSE)
+    queryDatabase(paste0("ALTER TABLE ",paste0("z_",datasetid)," ALTER COLUMN ",converttime,
+                         " TYPE TIMESTAMP USING to_timestamp(",converttime,", 'YYYY-MM-DD HH24:MI:SS');"))
+  }
   # add dataset id and foreign key
   queryDatabase(paste0("ALTER TABLE ",paste0("z_",datasetid)," ADD COLUMN datasetID nchar(10);"))
   queryDatabase(paste0("UPDATE ",paste0("z_",datasetid)," SET datasetID = '",datasetid,"';"))
@@ -351,11 +357,15 @@ combineFiles = function(path,filepattern,fileformat,sheetchoice="Daten",save="n"
     for (n in seq_along(filenames)){
       print(n)
       if (n==1){
-        names = colnames(read_delim(paste0(path,filenames[n]),skip=skiphead,delim=","))
-        data = read_delim(paste0(path,filenames[n]),col_names=names,skip=skipdata,delim=",")
+        names1 = colnames(read_delim(paste0(path,filenames[n]),skip=skiphead,delim=","))
+        data = read_delim(paste0(path,filenames[n]),col_names=names1,skip=skipdata,delim=",")
       } else {
         names = colnames(read_delim(paste0(path,filenames[n]),skip=skiphead,delim=","))
         newdata = read_delim(paste0(path,filenames[n]),col_names=names,skip=skipdata,delim=",")
+        if (path == "/Volumes/daten_inst/oekophysiologie/Data/Old_Datenbank/Dokumentationen/ClimLUC/Data/Meteo 2020/CR1000_MC2_MR2/dat/"){
+          print("Colnames changed in summer 2020! Using old names")
+          colnames(newdata) = names1
+        }
         data = bind_rows(data,newdata)
       }
     } }
