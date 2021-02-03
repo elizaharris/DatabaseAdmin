@@ -7,7 +7,7 @@
 writeValuesToDatabase(
   values,
   tableName,
-  appendChoice,
+  appendChoice = FALSE,
   appendType = "match",
   key = 0
 )
@@ -19,7 +19,7 @@ writeValuesToDatabase(
 
 \item{appendChoice}{TRUE to append to existing table of the same name; otherwise false}
 
-\item{appendType}{match is the default; this means the existing and new tables have the same columns. "outer" can also be chosen for an outer join of existing and new data.}
+\item{appendType}{"match" is the default; this means the existing and new tables have the same columns. "outer" can also be chosen for an outer join of existing and new data.}
 
 \item{key}{column used to compare the old and new data; only new data unique in this column will be added (eg. use date or a key/id). With outer join appending, multiple keys are allowed. With match appending, so far only one key is implemented.}
 }

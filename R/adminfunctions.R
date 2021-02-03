@@ -136,11 +136,11 @@ FixIDs <- function(data,uniq=FALSE){
 #' @param values tibble to be added to the server
 #' @param tableName name of table in the database
 #' @param appendChoice TRUE to append to existing table of the same name; otherwise false
-#' @param appendType match is the default; this means the existing and new tables have the same columns. "outer" can also be chosen for an outer join of existing and new data.
+#' @param appendType "match" is the default; this means the existing and new tables have the same columns. "outer" can also be chosen for an outer join of existing and new data.
 #' @param key column used to compare the old and new data; only new data unique in this column will be added (eg. use date or a key/id). With outer join appending, multiple keys are allowed. With match appending, so far only one key is implemented.
 #' @keywords database
 #' @export
-writeValuesToDatabase <- function(values, tableName, appendChoice, appendType="match", key=0){
+writeValuesToDatabase <- function(values, tableName, appendChoice=FALSE, appendType="match", key=0){
   on.exit(dbDisconnect(con))
   con <- dbConnect(drv = dbDriver("PostgreSQL"),
                    dbname = "c7701050", host = "db06.intra.uibk.ac.at",
@@ -151,23 +151,8 @@ writeValuesToDatabase <- function(values, tableName, appendChoice, appendType="m
   if (!appendChoice){
     dbWriteTable(con, tableName, value = values, append = FALSE)
   }
-  # case = append, same columns names in new and old data
-  if (appendChoice & appendType=="match" & dbExistsTable(con, tableName)){
-    # if appending, compare the pub id keys in the existing and new table and add only new data
-    tmp = queryDatabase(paste0("SELECT * FROM ",tableName))
-    values[,key][[1]] = dbSafeNames(values[,key][[1]])
-    new = setdiff(values[,key][[1]],tmp[,key])
-    if (length(new)>0){
-      r = as.integer(new)
-      for (n in 1:length(new)){r[n] = which(values[,key]==new[n])}
-      dbWriteTable(con, tableName, value = values[r,], append = TRUE)
-    } else { print("No new rows in table") }
-  }
-  # case = append, new columns added, use outer join
-  if (appendChoice & appendType=="outer" & dbExistsTable(con, tableName)){
-    print("Before appending new data:")
-    prev_size = showSize(tableName)
-    # compare the chosen keys in the existing and new table and add only new data
+  # if appending, check row matchs
+  if (appendChoice){
     for (n in seq_along(key)){ # get the key from the database
       tmp = queryDatabase(paste0("SELECT ",key[n]," FROM ",tableName))[[1]]
       if (class(tmp)[1]=="POSIXct"){ tmp = as.numeric(tmp) }
@@ -182,13 +167,26 @@ writeValuesToDatabase <- function(values, tableName, appendChoice, appendType="m
       } else { v_key = cbind(v_key,dbSafeNames(tmp)) }
     }
     for (n in seq_along(key)){ # combine multiple keys into a single string for better comparison
-      if (n == 1){ db_key_comb = db_key[,1]
-      v_key_comb = v_key[,1]
+      if (n == 1){ db_key_comb = db_key
+        v_key_comb = v_key
       } else { db_key_comb = paste(db_key_comb,db_key[,n],sep="_")
-      v_key_comb = paste(v_key_comb,v_key[,n],sep="_")
+        v_key_comb = paste(v_key_comb,v_key[,n],sep="_")
       }
     }
-    new = setdiff(v_key_comb,db_key_comb)
+    newrows = setdiff(v_key_comb,db_key_comb)
+  }
+  # case = append, same columns names in new and old data
+  if (appendChoice & appendType=="match" & dbExistsTable(con, tableName)){
+    if (length(newrows)>0){
+      r = suppressWarnings(as.integer(newrows))
+      for (n in 1:length(newrows)){r[n] = which(v_key_comb==newrows[n])}
+      dbWriteTable(con, tableName, value = values[r,], append = TRUE)
+    } else { print("No new rows in table") }
+  }
+  # case = append, new columns added, use outer join
+  if (appendChoice & appendType=="outer" & dbExistsTable(con, tableName)){
+    print("Before appending new data:")
+    prev_size = showSize(tableName)
     # find which columns are new and add these to the database
     values = values[,colnames(values)!="X1"]
     existing_cols = queryDatabase(paste0("SELECT column_name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '",tableName,"';"))[,1]
@@ -205,12 +203,12 @@ writeValuesToDatabase <- function(values, tableName, appendChoice, appendType="m
       new_cols
     } else {print("No new columns were added.")}
     # add the new data to the database
-    if (length(new)>0){
-      r = as.integer(new)
-      for (n in 1:length(new)){r[n] = which(v_key_comb==new[n])}
+    if (length(newrows)>0){
+      r = suppressWarnings(as.integer(newrows))
+      for (n in 1:length(newrows)){r[n] = which(v_key_comb==newrows[n])}
       newdata = data.frame(values[r,])
       for (n in seq_along(newdata[1,])){
-        if (!is.POSIXct(newdata[,n])){
+        if (!is.POSIXct(newdata[,n]) && !is.character(newdata[,n])){
           tmp = which(newdata[,n]>99999999 | newdata[,n]=="Inf")
           newdata[tmp,n] = NA # get rid of Inf values (not allowed in postgres)
         } }
@@ -230,18 +228,19 @@ writeValuesToDatabase <- function(values, tableName, appendChoice, appendType="m
 #' @param data_path Path from the base path data folder to the csv data file
 #' @param datasetid ID for the dataset to be added (the dataset must already have been added to the datasets table!)
 #' @param converttime If 0, dataset is added as normal. If "timename" then the column timename is converted from PosixCT to a time string before it is added to the database. It is then converted back to a timestamp in Postgres. The reason for this is because timestamps are causing R to crash in newest versions of DBI?
+#' @param maxlines Maximum number of lines that should be read from the csv. Default is Inf (all lines), can be set lower for very large files.
 #' @keywords database
 #' @examples New example, test online
 #' @export
-writeNewDataset_single <- function(data_path, datasetid, base_path="/Volumes/daten_inst/oekophysiologie/",converttime=0){
+writeNewDataset_single <- function(data_path, datasetid, base_path="/Volumes/daten_inst/oekophysiologie/",converttime=0,maxlines=Inf){
   pwd = getwd()
   setwd(base_path)
   datasetid = dbSafeNames(datasetid)
   # first drop any tables that already exist with the same name
   queryDatabase(paste0("DROP TABLE IF EXISTS ",paste0("z_",datasetid)," CASCADE;"))
   # get the data into R
-  data_alltypes = data.frame(read_csv(data_path, col_names = TRUE))
-  data = data.frame(read_csv(data_path, col_names = TRUE,col_types = cols(.default = "d")))
+  data_alltypes = data.frame(read_csv(data_path, col_names = TRUE,n_max=maxlines))
+  data = data.frame(read_csv(data_path, col_names = TRUE,col_types = cols(.default = "d"),n_max=maxlines))
   types = sapply(data_alltypes, class) # most logicals are not correct (1000 NA values is parsed as logical)
   tmp = which(sapply(types,function(x){x[[1]]=="POSIXct" | x[[1]]=="character"}))
   for (n in seq_along(tmp)){ data[,tmp[n]] = data_alltypes[,tmp[n]] } # this puts the non-logical columns into data
@@ -255,7 +254,7 @@ writeNewDataset_single <- function(data_path, datasetid, base_path="/Volumes/dat
     data[,converttime] = format(data[,converttime], "%Y-%m-%d %H:%M:%S")
     writeValuesToDatabase(values = data, tableName = paste0("z_",datasetid), appendChoice = FALSE)
     queryDatabase(paste0("ALTER TABLE ",paste0("z_",datasetid)," ALTER COLUMN ",converttime,
-                         " TYPE TIMESTAMP USING to_timestamp(",converttime,", 'YYYY-MM-DD HH24:MI:SS');"))
+                         " TYPE TIMESTAMP WITH TIME ZONE USING to_timestamp(",converttime,", 'YYYY-MM-DD HH24:MI:SS');"))
   }
   # add dataset id and foreign key
   queryDatabase(paste0("ALTER TABLE ",paste0("z_",datasetid)," ADD COLUMN datasetID nchar(10);"))
