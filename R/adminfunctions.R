@@ -221,6 +221,55 @@ writeValuesToDatabase <- function(values, tableName, appendChoice=FALSE, appendT
   if (appendChoice & !dbExistsTable(con, tableName)){ print("Cannot append; table does not exist") }
 }
 
+#' Function for writing updating line(s) of a table already in the database
+#'
+#' This function will: i) connect to database, ii) find lines matching keyvalue[1] in the designated key
+#' column of the specified table and replace these line(s) of data with the line matching
+#' keyvalue[1] in the new data table, iii) repeat for keyvalues[n], iv) exit connection
+#' @param values updated data to go into table
+#' @param tableName name of table in the database
+#' @param key column used to compare the old and new data; new data will be updated where key matches keyvalue(s)
+#' @param keyvalues value(s) used to compare the old and new data; do not set this parameter if you wish to
+#' check all lines (can be slow!). More than one value can be set eg. c(key1,key2,...keyn).
+#' @keywords database
+#' @export
+editValuesInDatabase <- function(values, tableName, key, keyvalues=NA){
+  on.exit(dbDisconnect(con))
+  con <- dbConnect(drv = dbDriver("PostgreSQL"),
+                   dbname = "c7701050", host = "db06.intra.uibk.ac.at",
+                   port = 5432,
+                   user = keyring::key_list("databaseadminlogin", keyring ="DBcredentials")[1,2],
+                   password = keyring::key_get("databaseadminlogin", "c7701050", keyring ="DBcredentials"))
+  # if no keyvalues were input, use check all keyvalues
+  if (is.na(keyvalues[1])){keyvalues = values[,key][[1]]}
+  # check the keyvalues one by one...
+  for (n in seq_along(keyvalues)){
+      # get the matching row(s) from the database
+      tmp = queryDatabase(paste0("SELECT * FROM ",tableName," WHERE ",key," = '",keyvalues[n],"'"))
+      # get the matching row(s) from the new data table
+      tmp2 = values[which(values[key]==keyvalues[n]),]
+      # update the columns that need updating
+      if (dim(tmp2)[1]!=1){
+        print(paste0("Error: More than one column in the new data matches the keyvalue: ",keyvalues[n]," - data cannot be replaced"))
+      } else {
+        for (i in seq_along(tmp2)){
+          tmpname = colnames(tmp2)[i]
+          if (is.na(tmp2[tmpname])){tmp2[tmpname]="NA"}
+          if (is.na(tmp[tmpname][1])){tmp[tmpname][1]="NA"}
+          if (tmp2[tmpname] != tmp[tmpname][1]){
+            # update the value
+            queryDatabase(paste0("UPDATE ",tableName,
+            " SET ",tmpname," = '",tmp2[tmpname],
+            "' WHERE ",key," = '",keyvalues[n],"' RETURNING *"))
+            # print confirmation of the update
+            print(paste0("For ",keyvalues[n],"; column ",tmpname,
+                         "; ",tmp[tmpname][1]," was changed to ",tmp2[tmpname]))
+          }
+        }
+      }
+  }
+}
+
 #' Function for writing a single new dataset from a csv to the database
 #' This function will: i) connect to database, ii) drop the old table if exists and write the new table,
 #' iii) add datasetid column and foreign key referencing datasets table, iv) exit connection
