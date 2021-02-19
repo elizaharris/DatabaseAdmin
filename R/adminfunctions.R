@@ -189,16 +189,18 @@ writeValuesToDatabase <- function(values, tableName, appendChoice=FALSE, appendT
     prev_size = showSize(tableName)
     # find which columns are new and add these to the database
     values = values[,colnames(values)!="X1"]
+    colnames(values) = dbSafeNames(colnames(values))
+    for (x in seq_along(colnames(values))){colnames(values)[x] = str_replace(colnames(values)[x],"-","")}
     existing_cols = queryDatabase(paste0("SELECT column_name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '",tableName,"';"))[,1]
     new_cols = setdiff(colnames(values),existing_cols)
     for (n in seq_along(new_cols)){
       type = class(values[,new_cols[n]][[1]])[1]
-      if (type=="POSIXct"){type="timestamp"}
-      else if (type=="logical"){type="boolean"}
-      else if (type!="numeric"){print("column type is not recognised and needs to be added to function")}
+      if (type=="POSIXct"){type="timestamp"
+      } else if (type=="logical"){type="boolean"
+      } else if (type!="numeric"){print("column type is not recognised and needs to be added to function")}
       queryDatabase(paste0("ALTER TABLE ",tableName," ADD COLUMN ",new_cols[n]," ",type,";"))
     }
-    if (length(new)!=0){
+    if (length(new_cols)!=0){
       print("New columns were added:")
       new_cols
     } else {print("No new columns were added.")}
@@ -435,4 +437,102 @@ combineFiles = function(path,filepattern,fileformat,sheetchoice="Daten",save="n"
   return(data)
 }
 
+#' Function to unify the names between the old and new micromet
+#'
+#' This function gets the names from the adminstuff metadata table and unifies them from the old
+#' micromet data so that they match the new micromet metadata scheme
+#' 1. create the x_micromet table with the unedited data
+#' 2. split into a data and an uncertainty (std) table
+#' 3. unify the data table names with the naming scheme for the newer metadata
+#' 4. add to the database
+#' @export
+fixOldMetadata <- function(){
+  # add the raw data to the database
+  queryDatabase("DROP TABLE IF EXISTS x_micromet CASCADE")
+  tmp = allLegacyMicrometData
+  colnames(tmp) = make.names(colnames(allLegacyMicrometData),unique=TRUE)
+  writeValuesToDatabase(values = tmp, tableName = "x_micromet", appendChoice = FALSE)
+  rm(tmp)
+  # split into good names and not updated names
+  std_columns = sapply(colnames(allLegacyMicrometData),FUN=function(x){StrMatch(x,str1="_Std") | StrMatch(x,str1="std")})
+  allLegacyMicrometData_data = allLegacyMicrometData[,!std_columns]
+  allLegacyMicrometData_unc = allLegacyMicrometData[,std_columns]
+  # get the column names of the old version
+  existing_cols = colnames(allLegacyMicrometData_data)
+  # match the column names using the table Johnny generated for the new naming scheme
+  mm_metadata = queryDatabase("SELECT * FROM adminstuff.micrometmetadata")
+  newnames = mm_metadata$`colnamesnew-varname_offset_unit_treatment_duplicate_location`
+  # first quick match to newnames
+  tmp = map(existing_cols,function(x){which(newnames==x)})
+  newcolnames = matrix(nrow = 1,ncol=length(existing_cols))
+  for (n in 1:length(tmp)){
+    if (length(tmp[[n]])==0){
+      tmp[[n]] = which(mm_metadata$colnames_original==existing_cols[n]) }
+    if (length(tmp[[n]])==0){
+      tmp[[n]] = which(mm_metadata$alt_names==existing_cols[n]) }
+    if (length(tmp[[n]])!=0){ newcolnames[n]=newnames[tmp[[n]][1]] }
+  }
+  # check for duplicate naming and merge columns
+  newcolnames = newcolnames[seq_along(newcolnames)]
+  dupnames = which(duplicated(newcolnames))
+  nomoredups = 0;
+  while (nomoredups == 0){
+    for (n in seq_along(dupnames)){
+      if (is.na(newcolnames[dupnames[n]])){next}
+      tmp = which(newcolnames == newcolnames[dupnames[n]])
+      combine = NA
+      # check if data overlap
+      overlap = sum(!is.na(allLegacyMicrometData[[tmp[1]]]) & !is.na(allLegacyMicrometData[[tmp[2]]]))
+      # check if data are different
+      difference = t.test(allLegacyMicrometData[[tmp[1]]],allLegacyMicrometData[[tmp[2]]])$p.value
+      # check if data are identical
+      identical = abs(mean(allLegacyMicrometData[[tmp[1]]]-allLegacyMicrometData[[tmp[2]]],na.rm=TRUE)/mean(allLegacyMicrometData[[tmp[2]]],na.rm=TRUE)*100)
+      if (overlap == 0){identical = 100}
+      # combine as needed
+      if ((overlap<100 & difference < 0.001) | identical < 1){ # merge if similar and not overlapping
+        allLegacyMicrometData[[tmp[1]]][is.na(allLegacyMicrometData[[tmp[1]]])] = allLegacyMicrometData[[tmp[2]]][is.na(allLegacyMicrometData[[tmp[1]]])]
+        newcolnames[tmp[2]] = "merged"
+      } else { # mark as duplicate if not similar or overlapping
+        strlen = str_length(newcolnames[tmp[2]])
+        currentdup = as.numeric(substr(newcolnames[tmp[2]],strlen,strlen))
+        duplicatename = paste0(substr(newcolnames[tmp[2]],0,strlen-1),currentdup+1)
+        while (sum(newcolnames == duplicatename,na.rm=TRUE)==1){ # make sure we're not creating a double duplicate...
+          currentdup = currentdup + 1
+          duplicatename = paste0(substr(newcolnames[tmp[2]],0,strlen-1),currentdup+1)
+        }
+        newcolnames[tmp[2]] = duplicatename
+      }
+    }
+    dupnames = which(duplicated(newcolnames))
+    if (sum(!is.na(newcolnames[dupnames]) & newcolnames[dupnames]!="merged",na.rm=TRUE)==0){nomoredups = 1}
+  }
+  # check the matches and replace the colnames
+  newcolnames[existing_cols=="subsite"] = "subsite" # add any manual col names...
+  for (n in seq_along(newcolnames)){
+    if (!is.na(newcolnames[n])){
+      print(paste0(n," - ",existing_cols[n]," : ",newcolnames[n] ))
+      #newcolnames[n] = mm_metadata$`colnamesnew-varname_offset_unit_treatment_duplicate_location`[tmp[[n]]]
+    } else { print(paste0(n," - ",existing_cols[n]," : NO MATCH"))}
+  }
+  # split into good names and not updated names
+  good_columns = which(!is.na(newcolnames) & newcolnames!="merged")
+  allLegacyMicrometData_data = allLegacyMicrometData_data[,good_columns]
+  colnames(allLegacyMicrometData_data) = newcolnames[good_columns]
+  # add to the database
+  queryDatabase("DROP TABLE IF EXISTS z_micromet CASCADE")
+  writeValuesToDatabase(values = allLegacyMicrometData_data, tableName = "z_micromet", appendChoice = FALSE)
+}
 
+#' Function to run an R query that needs a con
+queryInR <- function(query){
+  on.exit(dbDisconnect(con))
+  con <- dbConnect(drv = dbDriver("PostgreSQL"),
+                   dbname = "c7701050", host = "db06.intra.uibk.ac.at",
+                   port = 5432,
+                   user = keyring::key_list("databaseadminlogin", keyring ="DBcredentials")[1,2],
+                   password = keyring::key_get("databaseadminlogin", "c7701050", keyring ="DBcredentials"))
+  eval(parse(text=query))
+}
+
+# Internal functions
+StrMatch = function(str1,str2){return(sum(grep(str1,str2))==1)}
