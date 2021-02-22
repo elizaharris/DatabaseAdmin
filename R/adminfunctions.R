@@ -168,9 +168,9 @@ writeValuesToDatabase <- function(values, tableName, appendChoice=FALSE, appendT
     }
     for (n in seq_along(key)){ # combine multiple keys into a single string for better comparison
       if (n == 1){ db_key_comb = db_key
-        v_key_comb = v_key
+      v_key_comb = v_key
       } else { db_key_comb = paste(db_key_comb,db_key[,n],sep="_")
-        v_key_comb = paste(v_key_comb,v_key[,n],sep="_")
+      v_key_comb = paste(v_key_comb,v_key[,n],sep="_")
       }
     }
     newrows = setdiff(v_key_comb,db_key_comb)
@@ -192,6 +192,7 @@ writeValuesToDatabase <- function(values, tableName, appendChoice=FALSE, appendT
     colnames(values) = dbSafeNames(colnames(values))
     for (x in seq_along(colnames(values))){colnames(values)[x] = str_replace(colnames(values)[x],"-","")}
     existing_cols = queryDatabase(paste0("SELECT column_name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '",tableName,"';"))[,1]
+    existing_cols = dbSafeNames(existing_cols)
     new_cols = setdiff(colnames(values),existing_cols)
     for (n in seq_along(new_cols)){
       type = class(values[,new_cols[n]][[1]])[1]
@@ -392,6 +393,7 @@ writeNewDataset <- function(data_path, metadata_path, datasetid, base_path="/Vol
 combineFiles = function(path,filepattern,fileformat,sheetchoice="Daten",save="n",skiphead=1,skipdata=4){
   filenames = list.files(path)
   filenames = filenames[grep(filepattern,filenames)]
+  if (length(filenames)==0){print(paste0("No matching files in ",path)); return(0)}
   if (fileformat=="xlsx"){
     for (n in seq_along(filenames)){
       if (n==1){
@@ -447,12 +449,12 @@ combineFiles = function(path,filepattern,fileformat,sheetchoice="Daten",save="n"
 #' 4. add to the database
 #' @export
 fixOldMetadata <- function(){
-  # add the raw data to the database
-  queryDatabase("DROP TABLE IF EXISTS x_micromet CASCADE")
-  tmp = allLegacyMicrometData
-  colnames(tmp) = make.names(colnames(allLegacyMicrometData),unique=TRUE)
-  writeValuesToDatabase(values = tmp, tableName = "x_micromet", appendChoice = FALSE)
-  rm(tmp)
+  # add the raw data to the database (run this if needed!)
+  #queryDatabase("DROP TABLE IF EXISTS x_micromet CASCADE")
+  #tmp = allLegacyMicrometData
+  #colnames(tmp) = make.names(colnames(allLegacyMicrometData),unique=TRUE)
+  #writeValuesToDatabase(values = tmp, tableName = "x_micromet", appendChoice = FALSE)
+  #rm(tmp)
   # split into good names and not updated names
   std_columns = sapply(colnames(allLegacyMicrometData),FUN=function(x){StrMatch(x,str1="_Std") | StrMatch(x,str1="std")})
   allLegacyMicrometData_data = allLegacyMicrometData[,!std_columns]
@@ -482,16 +484,17 @@ fixOldMetadata <- function(){
       tmp = which(newcolnames == newcolnames[dupnames[n]])
       combine = NA
       # check if data overlap
-      overlap = sum(!is.na(allLegacyMicrometData[[tmp[1]]]) & !is.na(allLegacyMicrometData[[tmp[2]]]))
+      overlap = sum(!is.na(allLegacyMicrometData_data[[tmp[1]]]) & !is.na(allLegacyMicrometData_data[[tmp[2]]]))/length(allLegacyMicrometData_data[[tmp[2]]])*100
       # check if data are different
-      difference = t.test(allLegacyMicrometData[[tmp[1]]],allLegacyMicrometData[[tmp[2]]])$p.value
+      difference = t.test(allLegacyMicrometData_data[[tmp[1]]],allLegacyMicrometData_data[[tmp[2]]])$p.value
       # check if data are identical
-      identical = abs(mean(allLegacyMicrometData[[tmp[1]]]-allLegacyMicrometData[[tmp[2]]],na.rm=TRUE)/mean(allLegacyMicrometData[[tmp[2]]],na.rm=TRUE)*100)
+      identical = abs(mean(allLegacyMicrometData_data[[tmp[1]]]-allLegacyMicrometData_data[[tmp[2]]],na.rm=TRUE)/mean(allLegacyMicrometData_data[[tmp[2]]],na.rm=TRUE)*100)
       if (overlap == 0){identical = 100}
       # combine as needed
-      if ((overlap<100 & difference < 0.001) | identical < 1){ # merge if similar and not overlapping
-        allLegacyMicrometData[[tmp[1]]][is.na(allLegacyMicrometData[[tmp[1]]])] = allLegacyMicrometData[[tmp[2]]][is.na(allLegacyMicrometData[[tmp[1]]])]
+      if ((overlap<1 & difference > 0.001) | identical < 1){ # merge if similar and not overlapping
+        allLegacyMicrometData_data[[tmp[1]]][is.na(allLegacyMicrometData_data[[tmp[1]]])] = allLegacyMicrometData_data[[tmp[2]]][is.na(allLegacyMicrometData_data[[tmp[1]]])]
         newcolnames[tmp[2]] = "merged"
+        print(paste0(n,": ",newcolnames[tmp[1]]," merged (cols ",tmp[1]," & ",tmp[2],")"))
       } else { # mark as duplicate if not similar or overlapping
         strlen = str_length(newcolnames[tmp[2]])
         currentdup = as.numeric(substr(newcolnames[tmp[2]],strlen,strlen))
@@ -500,6 +503,7 @@ fixOldMetadata <- function(){
           currentdup = currentdup + 1
           duplicatename = paste0(substr(newcolnames[tmp[2]],0,strlen-1),currentdup+1)
         }
+        print(paste0(n,": ",newcolnames[tmp[2]]," assigned to ",duplicatename," (cols ",tmp[1]," & ",tmp[2],")"))
         newcolnames[tmp[2]] = duplicatename
       }
     }
@@ -508,6 +512,7 @@ fixOldMetadata <- function(){
   }
   # check the matches and replace the colnames
   newcolnames[existing_cols=="subsite"] = "subsite" # add any manual col names...
+  newcolnames = dbSafeNames(newcolnames)
   for (n in seq_along(newcolnames)){
     if (!is.na(newcolnames[n])){
       print(paste0(n," - ",existing_cols[n]," : ",newcolnames[n] ))

@@ -1,6 +1,6 @@
 Package: DatabaseAdmin
-Title: This package contains functions (mostly in development) for management of the Functional Ecology database
-Version: 0.0.1.0000
+Title: This package contains functions for management of the Functional Ecology database
+Version: 0.0.2.0000
 Authors@R: 
     person(given = "Eliza",
            family = "Harris",
